@@ -10,6 +10,7 @@ import (
 const PayloadKey = "payload"
 
 type Handler func(id string, payload string) error
+type RedisOptions = redis.Options
 
 type Config struct {
 	Group    string
@@ -27,7 +28,7 @@ type Config struct {
 
 	Logger *log.Logger
 
-	Redis *redis.Options
+	Redis *RedisOptions
 }
 
 func (config *Config) AddListener(stream string, h Handler) {

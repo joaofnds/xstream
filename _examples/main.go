@@ -9,8 +9,6 @@ import (
 
 	"github.com/joaofnds/xstream"
 	"github.com/joaofnds/xstream/config"
-
-	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -23,7 +21,7 @@ func main() {
 		ReclaimCount:         100,
 		ReclaimMinIdleTime:   5000 * time.Millisecond,
 		ReclaimMaxDeliveries: 3,
-		Redis: &redis.Options{
+		Redis: &config.RedisOptions{
 			Addr:     "localhost:6379",
 			Password: "",
 			DB:       0,
