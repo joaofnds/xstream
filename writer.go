@@ -9,32 +9,36 @@ import (
 
 type Writer struct {
 	config *Config
-	conn   *Connection
+	client *redis.Client
 }
 
-func NewWriter(config *Config, conn *Connection) *Writer {
-	return &Writer{config: config, conn: conn}
+func NewWriter(config *Config) *Writer {
+	return &Writer{config: config, client: redis.NewClient(config.redis)}
 }
 
 func (w *Writer) Start(ctx context.Context) error {
-	return w.ensureGroupsExists(ctx)
+	return w.ensureGroupsExist(ctx)
 }
 
 func (w *Writer) Stop(context.Context) error {
 	return nil
 }
 
+func (w *Writer) Ping(ctx context.Context) error {
+	return w.client.Ping(ctx).Err()
+}
+
 func (w *Writer) Emit(ctx context.Context, stream string, payload string) error {
-	return w.conn.write.XAdd(ctx, &redis.XAddArgs{
+	return w.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: stream,
 		ID:     "*",
 		Values: map[string]any{PayloadKey: payload},
 	}).Err()
 }
 
-func (w *Writer) ensureGroupsExists(ctx context.Context) error {
+func (w *Writer) ensureGroupsExist(ctx context.Context) error {
 	for _, stream := range w.config.streams {
-		err := w.conn.write.XGroupCreateMkStream(ctx, stream, w.config.group, "$").Err()
+		err := w.client.XGroupCreateMkStream(ctx, stream, w.config.group, "$").Err()
 		if err != nil {
 			if !strings.Contains(err.Error(), "BUSYGROUP") {
 				return err

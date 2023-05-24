@@ -8,20 +8,20 @@ import (
 
 type Reader struct {
 	config *Config
-	conn   *Connection
+	client *redis.Client
 }
 
-func NewReader(config *Config, conn *Connection) *Reader {
-	return &Reader{config: config, conn: conn}
+func NewReader(config *Config) *Reader {
+	return &Reader{config: config, client: redis.NewClient(config.redis)}
 }
 
-func (l *Reader) Start(ctx context.Context) error {
+func (r *Reader) Start(ctx context.Context) error {
 	for {
-		streams, err := l.conn.read.XReadGroup(ctx, &redis.XReadGroupArgs{
-			Group:    l.config.group,
-			Consumer: l.config.consumer,
-			Streams:  streamsReadFormat(l.config.streams),
-			Block:    l.config.readTimeout,
+		streams, err := r.client.XReadGroup(ctx, &redis.XReadGroupArgs{
+			Group:    r.config.group,
+			Consumer: r.config.consumer,
+			Streams:  streamsReadFormat(r.config.streams),
+			Block:    r.config.readTimeout,
 			Count:    1,
 		}).Result()
 
@@ -31,20 +31,24 @@ func (l *Reader) Start(ctx context.Context) error {
 
 		for _, s := range streams {
 			for _, m := range s.Messages {
-				l.process(ctx, s.Stream, m)
+				r.process(ctx, s.Stream, m)
 			}
 		}
 	}
 }
 
-func (l *Reader) Stop(context.Context) error {
-	return nil
+func (r *Reader) Stop(context.Context) error {
+	return r.client.Close()
 }
 
-func (l *Reader) process(ctx context.Context, stream string, msg redis.XMessage) error {
-	if err := l.config.callHandler(stream, msg); err != nil {
+func (r *Reader) Ping(ctx context.Context) error {
+	return r.client.Ping(ctx).Err()
+}
+
+func (r *Reader) process(ctx context.Context, stream string, msg redis.XMessage) error {
+	if err := r.config.callHandler(stream, msg); err != nil {
 		return err
 	}
 
-	return l.conn.write.XAck(ctx, stream, l.config.group, msg.ID).Err()
+	return r.client.XAck(ctx, stream, r.config.group, msg.ID).Err()
 }

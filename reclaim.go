@@ -9,17 +9,17 @@ import (
 
 type Reclaimer struct {
 	config *Config
-	conn   *Connection
+	client *redis.Client
 }
 
-func NewReclaimer(config *Config, conn *Connection) *Reclaimer {
-	return &Reclaimer{config: config, conn: conn}
+func NewReclaimer(config *Config) *Reclaimer {
+	return &Reclaimer{config: config, client: redis.NewClient(config.redis)}
 }
 
 func (r *Reclaimer) Start(ctx context.Context) error {
 	for range time.Tick(r.config.reclaimInterval) {
 		for _, stream := range r.config.streams {
-			messages, _, err := r.conn.read.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+			messages, _, err := r.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 				Stream:   stream,
 				Group:    r.config.group,
 				Consumer: r.config.consumer,
@@ -51,8 +51,12 @@ func (r *Reclaimer) Stop(context.Context) error {
 	return nil
 }
 
+func (r *Reclaimer) Ping(ctx context.Context) error {
+	return r.client.Ping(ctx).Err()
+}
+
 func (r *Reclaimer) handleDead(ctx context.Context, stream string, m redis.XMessage) (bool, error) {
-	result, err := r.conn.reclaim.XPendingExt(ctx, &redis.XPendingExtArgs{
+	result, err := r.client.XPendingExt(ctx, &redis.XPendingExtArgs{
 		Stream: stream,
 		Group:  r.config.group,
 		Start:  m.ID,
@@ -68,11 +72,11 @@ func (r *Reclaimer) handleDead(ctx context.Context, stream string, m redis.XMess
 		return false, nil
 	}
 
-	if err := r.conn.reclaim.XAck(ctx, stream, r.config.group, m.ID).Err(); err != nil {
+	if err := r.client.XAck(ctx, stream, r.config.group, m.ID).Err(); err != nil {
 		return false, err
 	}
 
-	if err := r.conn.write.XAdd(ctx, &redis.XAddArgs{
+	if err := r.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: dlqFormat(stream),
 		ID:     "*",
 		Values: map[string]any{PayloadKey: m.Values[PayloadKey]},
@@ -92,5 +96,5 @@ func (r *Reclaimer) process(ctx context.Context, stream string, msg redis.XMessa
 		return err
 	}
 
-	return r.conn.write.XAck(ctx, stream, r.config.group, msg.ID).Err()
+	return r.client.XAck(ctx, stream, r.config.group, msg.ID).Err()
 }

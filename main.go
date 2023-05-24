@@ -18,9 +18,9 @@ func main() {
 		consumer:             "test-consumer",
 		streams:              []string{"user.created"},
 		reclaimEnabled:       true,
-		reclaimInterval:      1 * time.Second,
-		reclaimCount:         5,
-		reclaimMinIdleTime:   500 * time.Millisecond,
+		reclaimInterval:      1000 * time.Millisecond,
+		reclaimCount:         100,
+		reclaimMinIdleTime:   5000 * time.Millisecond,
 		reclaimMaxDeliveries: 3,
 		redis: &redis.Options{
 			Addr:     "localhost:6379",
@@ -32,7 +32,7 @@ func main() {
 	ctx := context.Background()
 
 	x.On("user.created", func(id, payload string) error {
-		<-time.After(2 * time.Second)
+		// <-time.After(2000 * time.Millisecond)
 		if rand.Intn(10) == 0 {
 			return errors.New("oops")
 		}
@@ -51,7 +51,7 @@ func main() {
 	}
 
 	go func() {
-		for t := range time.Tick(100 * time.Millisecond) {
+		for t := range time.Tick(1000 * time.Millisecond) {
 			x.writer.Emit(ctx, "user.created", t.String())
 		}
 	}()

@@ -7,10 +7,9 @@ import (
 
 type XStream struct {
 	config    *Config
-	conn      *Connection
-	listener  *Reader
-	reclaimer *Reclaimer
+	reader    *Reader
 	writer    *Writer
+	reclaimer *Reclaimer
 }
 
 func NewXStream(config *Config) *XStream {
@@ -22,19 +21,12 @@ func NewXStream(config *Config) *XStream {
 		config.logger = log.Default()
 	}
 
-	conn := NewConnection(config.redis)
-
 	return &XStream{
 		config:    config,
-		conn:      conn,
-		listener:  NewReader(config, conn),
-		writer:    NewWriter(config, conn),
-		reclaimer: NewReclaimer(config, conn),
+		reader:    NewReader(config),
+		writer:    NewWriter(config),
+		reclaimer: NewReclaimer(config),
 	}
-}
-
-func (x *XStream) Ping(ctx context.Context) error {
-	return x.conn.Ping(ctx)
 }
 
 func (x *XStream) Start(ctx context.Context) error {
@@ -46,7 +38,7 @@ func (x *XStream) Start(ctx context.Context) error {
 		return err
 	}
 
-	go x.listener.Start(ctx)
+	go x.reader.Start(ctx)
 	if x.config.reclaimEnabled {
 		go x.reclaimer.Start(ctx)
 	}
@@ -55,7 +47,7 @@ func (x *XStream) Start(ctx context.Context) error {
 }
 
 func (x *XStream) Stop(ctx context.Context) error {
-	if err := x.listener.Stop(ctx); err != nil {
+	if err := x.reader.Stop(ctx); err != nil {
 		return err
 	}
 
@@ -63,11 +55,19 @@ func (x *XStream) Stop(ctx context.Context) error {
 		return err
 	}
 
-	if err := x.reclaimer.Stop(ctx); err != nil {
+	return x.reclaimer.Stop(ctx)
+}
+
+func (x *XStream) Ping(ctx context.Context) error {
+	if err := x.reader.Ping(ctx); err != nil {
 		return err
 	}
 
-	return x.conn.Close()
+	if err := x.writer.Ping(ctx); err != nil {
+		return err
+	}
+
+	return x.reclaimer.Ping(ctx)
 }
 
 func (x *XStream) On(stream string, h Handler) {
