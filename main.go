@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
+	"log"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -19,17 +19,22 @@ const PayloadKey = "payload"
 type Handler func(payload string) error
 
 type Config struct {
-	group                string
-	consumer             string
+	group    string
+	consumer string
+
 	readTimeout          time.Duration
 	reclaimEnabled       bool
 	reclaimCount         int
 	reclaimInterval      time.Duration
 	reclaimMinIdleTime   time.Duration
 	reclaimMaxDeliveries int
-	streams              []string
-	redis                *redis.Options
-	handlers             map[string]Handler
+
+	streams  []string
+	handlers map[string]Handler
+
+	logger *log.Logger
+
+	redis *redis.Options
 
 	read    *redis.Client
 	write   *redis.Client
@@ -43,6 +48,10 @@ type XStream struct {
 func NewXStream(config *Config) *XStream {
 	if config.handlers == nil {
 		config.handlers = map[string]Handler{}
+	}
+
+	if config.logger == nil {
+		config.logger = log.Default()
 	}
 
 	if config.read == nil {
@@ -104,19 +113,18 @@ func (conn *XStream) Stop() error {
 }
 
 func (conn *XStream) Emit(ctx context.Context, event string, payload string) error {
-	_, err := conn.config.write.XAdd(ctx, &redis.XAddArgs{
+	return conn.config.write.XAdd(ctx, &redis.XAddArgs{
 		Stream: event,
 		ID:     "*",
 		Values: map[string]any{PayloadKey: payload},
-	}).Result()
-	return err
+	}).Err()
 }
 
 func (conn *XStream) On(stream string, f Handler) {
 	conn.config.handlers[stream] = f
 }
 
-func (conn *XStream) OnDlq(stream string, f Handler) {
+func (conn *XStream) OnDLQ(stream string, f Handler) {
 	conn.config.handlers[dlqFormat(stream)] = f
 }
 
@@ -141,6 +149,7 @@ func (conn *XStream) listenLoop(ctx context.Context) error {
 		}
 	}
 }
+
 func (conn *XStream) ensureGroupsExists(ctx context.Context) error {
 	for _, stream := range conn.config.streams {
 		err := conn.config.write.XGroupCreateMkStream(ctx, stream, conn.config.group, "$").Err()
@@ -149,7 +158,7 @@ func (conn *XStream) ensureGroupsExists(ctx context.Context) error {
 				return err
 			}
 		} else {
-			fmt.Println("group created")
+			conn.config.logger.Println("group created for stream " + stream)
 		}
 	}
 
@@ -159,12 +168,12 @@ func (conn *XStream) ensureGroupsExists(ctx context.Context) error {
 func (conn *XStream) process(ctx context.Context, stream string, m redis.XMessage) error {
 	h, ok := conn.config.handlers[stream]
 	if !ok {
-		fmt.Printf("handler for stream %s not found\n", stream)
+		conn.config.logger.Println("no handlers for %s" + stream)
 		return nil
 	}
 
 	if err := h(m.Values[PayloadKey].(string)); err != nil {
-		fmt.Printf("failed to process message %s\n", m.ID)
+		conn.config.logger.Println("failed to process message " + m.ID)
 		return err
 	}
 
@@ -227,12 +236,12 @@ func (conn *XStream) handleDead(ctx context.Context, stream string, m redis.XMes
 		ID:     "*",
 		Values: map[string]any{PayloadKey: m.Values[PayloadKey]},
 	}).Err(); err != nil {
-		panic(err)
+		return false, err
 	}
 
 	if h, ok := conn.config.handlers[dlqFormat(stream)]; ok {
 		if err := h(m.Values[PayloadKey].(string)); err != nil {
-			fmt.Printf("failed to process dead message %s\n", m.ID)
+			conn.config.logger.Println("failed to process dead message " + m.ID)
 		}
 	}
 
@@ -279,7 +288,7 @@ func main() {
 		return nil
 	})
 
-	conn.OnDlq("user.created", func(payload string) error {
+	conn.OnDLQ("user.created", func(payload string) error {
 		println("dead message: " + payload)
 		return nil
 	})
