@@ -33,7 +33,7 @@ func (r *Reader) Start(ctx context.Context) error {
 
 		for _, s := range streams {
 			for _, m := range s.Messages {
-				r.process(ctx, s.Stream, m)
+				go r.process(ctx, s.Stream, m)
 			}
 		}
 	}

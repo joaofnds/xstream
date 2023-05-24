@@ -41,7 +41,7 @@ func (r *Reclaimer) Start(ctx context.Context) error {
 				}
 
 				if !isDead {
-					r.process(ctx, stream, m)
+					go r.process(ctx, stream, m)
 				}
 			}
 		}
