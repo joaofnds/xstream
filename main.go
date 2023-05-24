@@ -32,7 +32,7 @@ type Config struct {
 	handlers             map[string]Handler
 }
 
-type Connection struct {
+type XStream struct {
 	config *Config
 
 	read    *redis.Client
@@ -40,12 +40,12 @@ type Connection struct {
 	reclaim *redis.Client
 }
 
-func NewConnection(config *Config) *Connection {
+func NewXStream(config *Config) *XStream {
 	if config.handlers == nil {
 		config.handlers = map[string]Handler{}
 	}
 
-	return &Connection{
+	return &XStream{
 		config:  config,
 		read:    redis.NewClient(config.redis),
 		write:   redis.NewClient(config.redis),
@@ -53,7 +53,7 @@ func NewConnection(config *Config) *Connection {
 	}
 }
 
-func (conn *Connection) Ping(ctx context.Context) error {
+func (conn *XStream) Ping(ctx context.Context) error {
 	if err := conn.read.Ping(ctx).Err(); err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func (conn *Connection) Ping(ctx context.Context) error {
 	return conn.reclaim.Ping(ctx).Err()
 }
 
-func (conn *Connection) Start(ctx context.Context) error {
+func (conn *XStream) Start(ctx context.Context) error {
 	if err := conn.Ping(ctx); err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (conn *Connection) Start(ctx context.Context) error {
 	return nil
 }
 
-func (conn *Connection) Stop() error {
+func (conn *XStream) Stop() error {
 	if err := conn.read.Close(); err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func (conn *Connection) Stop() error {
 	return conn.reclaim.Close()
 }
 
-func (conn *Connection) Emit(ctx context.Context, event string, payload string) error {
+func (conn *XStream) Emit(ctx context.Context, event string, payload string) error {
 	_, err := conn.write.XAdd(ctx, &redis.XAddArgs{
 		Stream: event,
 		ID:     "*",
@@ -113,7 +113,7 @@ func dlqFormat(stream string) string {
 	return "dead:" + stream
 }
 
-func (conn *Connection) ensureGroupsExists(ctx context.Context) error {
+func (conn *XStream) ensureGroupsExists(ctx context.Context) error {
 	for _, stream := range conn.config.streams {
 		err := conn.write.XGroupCreateMkStream(ctx, stream, conn.config.group, "$").Err()
 		if err != nil {
@@ -128,7 +128,7 @@ func (conn *Connection) ensureGroupsExists(ctx context.Context) error {
 	return nil
 }
 
-func (conn *Connection) Process(ctx context.Context, stream string, m redis.XMessage) error {
+func (conn *XStream) Process(ctx context.Context, stream string, m redis.XMessage) error {
 	h, ok := conn.config.handlers[stream]
 	if !ok {
 		fmt.Printf("handler for stream %s not found\n", stream)
@@ -143,7 +143,7 @@ func (conn *Connection) Process(ctx context.Context, stream string, m redis.XMes
 	return conn.write.XAck(ctx, stream, conn.config.group, m.ID).Err()
 }
 
-func (conn *Connection) Listen(ctx context.Context) {
+func (conn *XStream) Listen(ctx context.Context) {
 	go func() {
 		for {
 			result := conn.read.XReadGroup(ctx, &redis.XReadGroupArgs{
@@ -167,15 +167,15 @@ func (conn *Connection) Listen(ctx context.Context) {
 	}()
 }
 
-func (conn *Connection) On(stream string, f Handler) {
+func (conn *XStream) On(stream string, f Handler) {
 	conn.config.handlers[stream] = f
 }
 
-func (conn *Connection) OnDlq(stream string, f Handler) {
+func (conn *XStream) OnDlq(stream string, f Handler) {
 	conn.config.handlers[dlqFormat(stream)] = f
 }
 
-func (conn *Connection) ReclaimLoop(ctx context.Context) {
+func (conn *XStream) ReclaimLoop(ctx context.Context) {
 	if !conn.config.reclaimEnabled {
 		return
 	}
@@ -208,7 +208,7 @@ func (conn *Connection) ReclaimLoop(ctx context.Context) {
 	}()
 }
 
-func (conn *Connection) handleDead(ctx context.Context, stream string, m redis.XMessage) bool {
+func (conn *XStream) handleDead(ctx context.Context, stream string, m redis.XMessage) bool {
 	result, err := conn.reclaim.XPendingExt(ctx, &redis.XPendingExtArgs{
 		Stream: stream,
 		Group:  conn.config.group,
@@ -246,7 +246,7 @@ func (conn *Connection) handleDead(ctx context.Context, stream string, m redis.X
 }
 
 func main() {
-	conn := NewConnection(&Config{
+	conn := NewXStream(&Config{
 		group:                "test-group",
 		consumer:             "test-consumer",
 		streams:              []string{"user.created"},
