@@ -7,13 +7,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joaofnds/xstream"
 	"github.com/joaofnds/xstream/config"
 
 	"github.com/redis/go-redis/v9"
 )
 
 func main() {
-	x := NewXStream(&config.Config{
+	x := xstream.NewXStream(&config.Config{
 		Group:                "test-Group",
 		Consumer:             "test-consumer",
 		Streams:              []string{"user.created"},
