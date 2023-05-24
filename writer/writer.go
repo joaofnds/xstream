@@ -30,7 +30,7 @@ func (w *Writer) Ping(ctx context.Context) error {
 	return w.client.Ping(ctx).Err()
 }
 
-func (w *Writer) Emit(ctx context.Context, stream string, payload string) error {
+func (w *Writer) Emit(ctx context.Context, stream string, payload config.Payload) error {
 	return w.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: stream,
 		ID:     "*",

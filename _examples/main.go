@@ -28,32 +28,27 @@ func main() {
 		},
 	})
 
-	x.On("user.created", func(id, payload string) error {
-		println("> " + payload)
+	x.On("user.created", func(id string, payload []byte) error {
+		println("> " + string(payload))
 		return nil
 	})
 
-	x.OnDLQ("user.created", func(id, payload string) error {
-		println("- " + payload)
+	x.OnDLQ("user.created", func(id string, payload []byte) error {
+		println("- " + string(payload))
 		return nil
 	})
 
 	ctx := context.Background()
-	if err := x.Start(ctx); err != nil {
-		panic(err)
-	}
+	x.Start(ctx)
+	defer x.Stop(ctx)
 
 	go func() {
-		for t := range time.Tick(1000 * time.Millisecond) {
-			x.Emit(ctx, "user.created", t.String())
+		for t := range time.Tick(100 * time.Millisecond) {
+			x.Emit(ctx, "user.created", config.Payload(t.String()))
 		}
 	}()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGABRT)
 	<-sigChan
-
-	if err := x.Stop(ctx); err != nil {
-		panic(err)
-	}
 }

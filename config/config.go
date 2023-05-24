@@ -9,7 +9,8 @@ import (
 
 const PayloadKey = "payload"
 
-type Handler func(id string, payload string) error
+type Payload = []byte
+type Handler func(id string, payload Payload) error
 type RedisOptions = redis.Options
 
 type Config struct {
@@ -37,7 +38,7 @@ func (config *Config) AddListener(stream string, h Handler) {
 
 func (config *Config) CallHandler(stream string, m redis.XMessage) error {
 	if handler, ok := config.Handlers[stream]; ok {
-		return handler(m.ID, m.Values[PayloadKey].(string))
+		return handler(m.ID, Payload(m.Values[PayloadKey].(string)))
 	}
 	return nil
 }
