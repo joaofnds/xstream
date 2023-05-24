@@ -71,70 +71,70 @@ func NewXStream(config *Config) *XStream {
 	}
 }
 
-func (conn *XStream) Ping(ctx context.Context) error {
-	if err := conn.config.read.Ping(ctx).Err(); err != nil {
+func (x *XStream) Ping(ctx context.Context) error {
+	if err := x.config.read.Ping(ctx).Err(); err != nil {
 		return err
 	}
 
-	if err := conn.config.write.Ping(ctx).Err(); err != nil {
+	if err := x.config.write.Ping(ctx).Err(); err != nil {
 		return err
 	}
 
-	return conn.config.reclaim.Ping(ctx).Err()
+	return x.config.reclaim.Ping(ctx).Err()
 }
 
-func (conn *XStream) Start(ctx context.Context) error {
-	if err := conn.Ping(ctx); err != nil {
+func (x *XStream) Start(ctx context.Context) error {
+	if err := x.Ping(ctx); err != nil {
 		return err
 	}
 
-	if err := conn.ensureGroupsExists(ctx); err != nil {
+	if err := x.ensureGroupsExists(ctx); err != nil {
 		return err
 	}
 
-	go conn.listenLoop(ctx)
-	if conn.config.reclaimEnabled {
-		go conn.reclaimLoop(ctx)
+	go x.listenLoop(ctx)
+	if x.config.reclaimEnabled {
+		go x.reclaimLoop(ctx)
 	}
 
 	return nil
 }
 
-func (conn *XStream) Stop() error {
-	if err := conn.config.read.Close(); err != nil {
+func (x *XStream) Stop() error {
+	if err := x.config.read.Close(); err != nil {
 		return err
 	}
 
-	if err := conn.config.write.Close(); err != nil {
+	if err := x.config.write.Close(); err != nil {
 		return err
 	}
 
-	return conn.config.reclaim.Close()
+	return x.config.reclaim.Close()
 }
 
-func (conn *XStream) Emit(ctx context.Context, event string, payload string) error {
-	return conn.config.write.XAdd(ctx, &redis.XAddArgs{
+func (x *XStream) Emit(ctx context.Context, event string, payload string) error {
+	return x.config.write.XAdd(ctx, &redis.XAddArgs{
 		Stream: event,
 		ID:     "*",
 		Values: map[string]any{PayloadKey: payload},
 	}).Err()
 }
 
-func (conn *XStream) On(stream string, f Handler) {
-	conn.config.handlers[stream] = f
+func (x *XStream) On(stream string, f Handler) {
+	x.config.handlers[stream] = f
 }
 
-func (conn *XStream) OnDLQ(stream string, f Handler) {
-	conn.config.handlers[dlqFormat(stream)] = f
+func (x *XStream) OnDLQ(stream string, f Handler) {
+	x.config.handlers[dlqFormat(stream)] = f
 }
 
-func (conn *XStream) listenLoop(ctx context.Context) error {
+func (x *XStream) listenLoop(ctx context.Context) error {
 	for {
-		streams, err := conn.config.read.XReadGroup(ctx, &redis.XReadGroupArgs{
-			Group:    conn.config.group,
-			Consumer: conn.config.consumer,
-			Streams:  streamsReadFormat(conn.config.streams),
-			Block:    conn.config.readTimeout,
+		streams, err := x.config.read.XReadGroup(ctx, &redis.XReadGroupArgs{
+			Group:    x.config.group,
+			Consumer: x.config.consumer,
+			Streams:  streamsReadFormat(x.config.streams),
+			Block:    x.config.readTimeout,
 			Count:    1,
 		}).Result()
 
@@ -144,52 +144,52 @@ func (conn *XStream) listenLoop(ctx context.Context) error {
 
 		for _, v := range streams {
 			for _, m := range v.Messages {
-				conn.process(ctx, v.Stream, m)
+				x.process(ctx, v.Stream, m)
 			}
 		}
 	}
 }
 
-func (conn *XStream) ensureGroupsExists(ctx context.Context) error {
-	for _, stream := range conn.config.streams {
-		err := conn.config.write.XGroupCreateMkStream(ctx, stream, conn.config.group, "$").Err()
+func (x *XStream) ensureGroupsExists(ctx context.Context) error {
+	for _, stream := range x.config.streams {
+		err := x.config.write.XGroupCreateMkStream(ctx, stream, x.config.group, "$").Err()
 		if err != nil {
 			if !strings.Contains(err.Error(), "BUSYGROUP") {
 				return err
 			}
 		} else {
-			conn.config.logger.Println("group created for stream " + stream)
+			x.config.logger.Println("group created for stream " + stream)
 		}
 	}
 
 	return nil
 }
 
-func (conn *XStream) process(ctx context.Context, stream string, m redis.XMessage) error {
-	h, ok := conn.config.handlers[stream]
+func (x *XStream) process(ctx context.Context, stream string, m redis.XMessage) error {
+	h, ok := x.config.handlers[stream]
 	if !ok {
-		conn.config.logger.Println("no handlers for %s" + stream)
+		x.config.logger.Println("no handlers for %s" + stream)
 		return nil
 	}
 
 	if err := h(m.Values[PayloadKey].(string)); err != nil {
-		conn.config.logger.Println("failed to process message " + m.ID)
+		x.config.logger.Println("failed to process message " + m.ID)
 		return err
 	}
 
-	return conn.config.write.XAck(ctx, stream, conn.config.group, m.ID).Err()
+	return x.config.write.XAck(ctx, stream, x.config.group, m.ID).Err()
 }
 
-func (conn *XStream) reclaimLoop(ctx context.Context) error {
-	for range time.Tick(conn.config.reclaimInterval) {
-		for _, stream := range conn.config.streams {
-			messages, _, err := conn.config.read.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+func (x *XStream) reclaimLoop(ctx context.Context) error {
+	for range time.Tick(x.config.reclaimInterval) {
+		for _, stream := range x.config.streams {
+			messages, _, err := x.config.read.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 				Stream:   stream,
-				Group:    conn.config.group,
-				Consumer: conn.config.consumer,
-				MinIdle:  conn.config.reclaimMinIdleTime,
+				Group:    x.config.group,
+				Consumer: x.config.consumer,
+				MinIdle:  x.config.reclaimMinIdleTime,
 				Start:    "0",
-				Count:    int64(conn.config.reclaimCount),
+				Count:    int64(x.config.reclaimCount),
 			}).Result()
 
 			if err != nil {
@@ -197,12 +197,12 @@ func (conn *XStream) reclaimLoop(ctx context.Context) error {
 			}
 
 			for _, m := range messages {
-				isDead, err := conn.handleDead(ctx, stream, m)
+				isDead, err := x.handleDead(ctx, stream, m)
 				if err != nil {
 					return err
 				}
 				if !isDead {
-					conn.process(ctx, stream, m)
+					x.process(ctx, stream, m)
 				}
 			}
 		}
@@ -210,10 +210,10 @@ func (conn *XStream) reclaimLoop(ctx context.Context) error {
 	return nil
 }
 
-func (conn *XStream) handleDead(ctx context.Context, stream string, m redis.XMessage) (bool, error) {
-	result, err := conn.config.reclaim.XPendingExt(ctx, &redis.XPendingExtArgs{
+func (x *XStream) handleDead(ctx context.Context, stream string, m redis.XMessage) (bool, error) {
+	result, err := x.config.reclaim.XPendingExt(ctx, &redis.XPendingExtArgs{
 		Stream: stream,
-		Group:  conn.config.group,
+		Group:  x.config.group,
 		Start:  m.ID,
 		End:    m.ID,
 		Count:  1,
@@ -223,15 +223,15 @@ func (conn *XStream) handleDead(ctx context.Context, stream string, m redis.XMes
 		return false, err
 	}
 
-	if result[0].RetryCount < int64(conn.config.reclaimMaxDeliveries) {
+	if result[0].RetryCount < int64(x.config.reclaimMaxDeliveries) {
 		return false, nil
 	}
 
-	if err := conn.config.reclaim.XAck(ctx, stream, conn.config.group, m.ID).Err(); err != nil {
+	if err := x.config.reclaim.XAck(ctx, stream, x.config.group, m.ID).Err(); err != nil {
 		return false, err
 	}
 
-	if err := conn.config.write.XAdd(ctx, &redis.XAddArgs{
+	if err := x.config.write.XAdd(ctx, &redis.XAddArgs{
 		Stream: dlqFormat(stream),
 		ID:     "*",
 		Values: map[string]any{PayloadKey: m.Values[PayloadKey]},
@@ -239,9 +239,9 @@ func (conn *XStream) handleDead(ctx context.Context, stream string, m redis.XMes
 		return false, err
 	}
 
-	if h, ok := conn.config.handlers[dlqFormat(stream)]; ok {
+	if h, ok := x.config.handlers[dlqFormat(stream)]; ok {
 		if err := h(m.Values[PayloadKey].(string)); err != nil {
-			conn.config.logger.Println("failed to process dead message " + m.ID)
+			x.config.logger.Println("failed to process dead message " + m.ID)
 		}
 	}
 
@@ -261,7 +261,7 @@ func dlqFormat(stream string) string {
 }
 
 func main() {
-	conn := NewXStream(&Config{
+	x := NewXStream(&Config{
 		group:                "test-group",
 		consumer:             "test-consumer",
 		streams:              []string{"user.created"},
@@ -279,7 +279,7 @@ func main() {
 
 	ctx := context.Background()
 
-	conn.On("user.created", func(payload string) error {
+	x.On("user.created", func(payload string) error {
 		if rand.Intn(10) == 0 {
 			return errors.New("oops")
 		}
@@ -288,18 +288,18 @@ func main() {
 		return nil
 	})
 
-	conn.OnDLQ("user.created", func(payload string) error {
+	x.OnDLQ("user.created", func(payload string) error {
 		println("dead message: " + payload)
 		return nil
 	})
 
-	if err := conn.Start(ctx); err != nil {
+	if err := x.Start(ctx); err != nil {
 		panic(err)
 	}
 
 	go func() {
 		for {
-			conn.Emit(ctx, "user.created", time.Now().String())
+			x.Emit(ctx, "user.created", time.Now().String())
 			<-time.After(100 * time.Millisecond)
 		}
 	}()
@@ -308,7 +308,7 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGABRT)
 	<-sigChan
 
-	if err := conn.Stop(); err != nil {
+	if err := x.Stop(); err != nil {
 		panic(err)
 	}
 }
