@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
-	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
@@ -31,15 +29,8 @@ func main() {
 		},
 	})
 
-	ctx := context.Background()
-
 	x.On("user.created", func(id, payload string) error {
-		// <-time.After(2000 * time.Millisecond)
-		if rand.Intn(10) == 0 {
-			return errors.New("oops")
-		}
-
-		println("> " + time.Now().String())
+		println("> " + payload)
 		return nil
 	})
 
@@ -48,6 +39,7 @@ func main() {
 		return nil
 	})
 
+	ctx := context.Background()
 	if err := x.Start(ctx); err != nil {
 		panic(err)
 	}
