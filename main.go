@@ -46,7 +46,7 @@ func main() {
 
 	go func() {
 		for t := range time.Tick(1000 * time.Millisecond) {
-			x.writer.Emit(ctx, "user.created", t.String())
+			x.Emit(ctx, "user.created", t.String())
 		}
 	}()
 
