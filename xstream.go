@@ -3,29 +3,34 @@ package main
 import (
 	"context"
 	"log"
+
+	"github.com/joaofnds/xstream/config"
+	"github.com/joaofnds/xstream/reader"
+	"github.com/joaofnds/xstream/reclaimer"
+	"github.com/joaofnds/xstream/writer"
 )
 
 type XStream struct {
-	config    *Config
-	reader    *Reader
-	writer    *Writer
-	reclaimer *Reclaimer
+	config    *config.Config
+	reader    *reader.Reader
+	writer    *writer.Writer
+	reclaimer *reclaimer.Reclaimer
 }
 
-func NewXStream(config *Config) *XStream {
-	if config.handlers == nil {
-		config.handlers = map[string]Handler{}
+func NewXStream(cfg *config.Config) *XStream {
+	if cfg.Handlers == nil {
+		cfg.Handlers = map[string]config.Handler{}
 	}
 
-	if config.logger == nil {
-		config.logger = log.Default()
+	if cfg.Logger == nil {
+		cfg.Logger = log.Default()
 	}
 
 	return &XStream{
-		config:    config,
-		reader:    NewReader(config),
-		writer:    NewWriter(config),
-		reclaimer: NewReclaimer(config),
+		config:    cfg,
+		reader:    reader.NewReader(cfg),
+		writer:    writer.NewWriter(cfg),
+		reclaimer: reclaimer.NewReclaimer(cfg),
 	}
 }
 
@@ -39,7 +44,7 @@ func (x *XStream) Start(ctx context.Context) error {
 	}
 
 	go x.reader.Start(ctx)
-	if x.config.reclaimEnabled {
+	if x.config.ReclaimEnabled {
 		go x.reclaimer.Start(ctx)
 	}
 
@@ -70,22 +75,10 @@ func (x *XStream) Ping(ctx context.Context) error {
 	return x.reclaimer.Ping(ctx)
 }
 
-func (x *XStream) On(stream string, h Handler) {
-	x.config.addListener(stream, h)
+func (x *XStream) On(stream string, h config.Handler) {
+	x.config.AddListener(stream, h)
 }
 
-func (x *XStream) OnDLQ(stream string, h Handler) {
-	x.config.addListener(dlqFormat(stream), h)
-}
-
-func streamsReadFormat(streams []string) []string {
-	result := make([]string, 0, len(streams)*2)
-	for _, s := range streams {
-		result = append(result, s, ">")
-	}
-	return result
-}
-
-func dlqFormat(stream string) string {
-	return "dead:" + stream
+func (x *XStream) OnDLQ(stream string, h config.Handler) {
+	x.config.AddListener(x.config.DLQFormat(stream), h)
 }

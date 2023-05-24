@@ -9,20 +9,22 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joaofnds/xstream/config"
+
 	"github.com/redis/go-redis/v9"
 )
 
 func main() {
-	x := NewXStream(&Config{
-		group:                "test-group",
-		consumer:             "test-consumer",
-		streams:              []string{"user.created"},
-		reclaimEnabled:       true,
-		reclaimInterval:      1000 * time.Millisecond,
-		reclaimCount:         100,
-		reclaimMinIdleTime:   5000 * time.Millisecond,
-		reclaimMaxDeliveries: 3,
-		redis: &redis.Options{
+	x := NewXStream(&config.Config{
+		Group:                "test-Group",
+		Consumer:             "test-consumer",
+		Streams:              []string{"user.created"},
+		ReclaimEnabled:       true,
+		ReclaimInterval:      1000 * time.Millisecond,
+		ReclaimCount:         100,
+		ReclaimMinIdleTime:   5000 * time.Millisecond,
+		ReclaimMaxDeliveries: 3,
+		Redis: &redis.Options{
 			Addr:     "localhost:6379",
 			Password: "",
 			DB:       0,

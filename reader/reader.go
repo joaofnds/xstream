@@ -1,27 +1,29 @@
-package main
+package reader
 
 import (
 	"context"
+
+	"github.com/joaofnds/xstream/config"
 
 	"github.com/redis/go-redis/v9"
 )
 
 type Reader struct {
-	config *Config
+	config *config.Config
 	client *redis.Client
 }
 
-func NewReader(config *Config) *Reader {
-	return &Reader{config: config, client: redis.NewClient(config.redis)}
+func NewReader(cfg *config.Config) *Reader {
+	return &Reader{config: cfg, client: redis.NewClient(cfg.Redis)}
 }
 
 func (r *Reader) Start(ctx context.Context) error {
 	for {
 		streams, err := r.client.XReadGroup(ctx, &redis.XReadGroupArgs{
-			Group:    r.config.group,
-			Consumer: r.config.consumer,
-			Streams:  streamsReadFormat(r.config.streams),
-			Block:    r.config.readTimeout,
+			Group:    r.config.Group,
+			Consumer: r.config.Consumer,
+			Streams:  r.config.StreamsReadFormat(r.config.Streams),
+			Block:    r.config.ReadTimeout,
 			Count:    1,
 		}).Result()
 
@@ -37,7 +39,7 @@ func (r *Reader) Start(ctx context.Context) error {
 	}
 }
 
-func (r *Reader) Stop(context.Context) error {
+func (r *Reader) Stop(_ context.Context) error {
 	return r.client.Close()
 }
 
@@ -46,9 +48,9 @@ func (r *Reader) Ping(ctx context.Context) error {
 }
 
 func (r *Reader) process(ctx context.Context, stream string, msg redis.XMessage) error {
-	if err := r.config.callHandler(stream, msg); err != nil {
+	if err := r.config.CallHandler(stream, msg); err != nil {
 		return err
 	}
 
-	return r.client.XAck(ctx, stream, r.config.group, msg.ID).Err()
+	return r.client.XAck(ctx, stream, r.config.Group, msg.ID).Err()
 }
