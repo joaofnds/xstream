@@ -18,31 +18,9 @@ const PayloadKey = "payload"
 
 type Handler func(payload string) error
 
-type Config struct {
-	group    string
-	consumer string
-
-	readTimeout          time.Duration
-	reclaimEnabled       bool
-	reclaimCount         int
-	reclaimInterval      time.Duration
-	reclaimMinIdleTime   time.Duration
-	reclaimMaxDeliveries int
-
-	streams  []string
-	handlers map[string]Handler
-
-	logger *log.Logger
-
-	redis *redis.Options
-
-	read    *redis.Client
-	write   *redis.Client
-	reclaim *redis.Client
-}
-
 type XStream struct {
 	config *Config
+	conn   *Connection
 }
 
 func NewXStream(config *Config) *XStream {
@@ -54,33 +32,14 @@ func NewXStream(config *Config) *XStream {
 		config.logger = log.Default()
 	}
 
-	if config.read == nil {
-		config.read = redis.NewClient(config.redis)
-	}
-
-	if config.write == nil {
-		config.write = redis.NewClient(config.redis)
-	}
-
-	if config.reclaim == nil {
-		config.reclaim = redis.NewClient(config.redis)
-	}
-
 	return &XStream{
 		config: config,
+		conn:   NewConnection(config.redis),
 	}
 }
 
 func (x *XStream) Ping(ctx context.Context) error {
-	if err := x.config.read.Ping(ctx).Err(); err != nil {
-		return err
-	}
-
-	if err := x.config.write.Ping(ctx).Err(); err != nil {
-		return err
-	}
-
-	return x.config.reclaim.Ping(ctx).Err()
+	return x.conn.Ping(ctx)
 }
 
 func (x *XStream) Start(ctx context.Context) error {
@@ -101,19 +60,11 @@ func (x *XStream) Start(ctx context.Context) error {
 }
 
 func (x *XStream) Stop() error {
-	if err := x.config.read.Close(); err != nil {
-		return err
-	}
-
-	if err := x.config.write.Close(); err != nil {
-		return err
-	}
-
-	return x.config.reclaim.Close()
+	return x.conn.Close()
 }
 
 func (x *XStream) Emit(ctx context.Context, event string, payload string) error {
-	return x.config.write.XAdd(ctx, &redis.XAddArgs{
+	return x.conn.write.XAdd(ctx, &redis.XAddArgs{
 		Stream: event,
 		ID:     "*",
 		Values: map[string]any{PayloadKey: payload},
@@ -128,9 +79,24 @@ func (x *XStream) OnDLQ(stream string, f Handler) {
 	x.config.handlers[dlqFormat(stream)] = f
 }
 
+func (x *XStream) ensureGroupsExists(ctx context.Context) error {
+	for _, stream := range x.config.streams {
+		err := x.conn.write.XGroupCreateMkStream(ctx, stream, x.config.group, "$").Err()
+		if err != nil {
+			if !strings.Contains(err.Error(), "BUSYGROUP") {
+				return err
+			}
+		} else {
+			x.config.logger.Println("group created for stream " + stream)
+		}
+	}
+
+	return nil
+}
+
 func (x *XStream) listenLoop(ctx context.Context) error {
 	for {
-		streams, err := x.config.read.XReadGroup(ctx, &redis.XReadGroupArgs{
+		streams, err := x.conn.read.XReadGroup(ctx, &redis.XReadGroupArgs{
 			Group:    x.config.group,
 			Consumer: x.config.consumer,
 			Streams:  streamsReadFormat(x.config.streams),
@@ -150,21 +116,6 @@ func (x *XStream) listenLoop(ctx context.Context) error {
 	}
 }
 
-func (x *XStream) ensureGroupsExists(ctx context.Context) error {
-	for _, stream := range x.config.streams {
-		err := x.config.write.XGroupCreateMkStream(ctx, stream, x.config.group, "$").Err()
-		if err != nil {
-			if !strings.Contains(err.Error(), "BUSYGROUP") {
-				return err
-			}
-		} else {
-			x.config.logger.Println("group created for stream " + stream)
-		}
-	}
-
-	return nil
-}
-
 func (x *XStream) process(ctx context.Context, stream string, m redis.XMessage) error {
 	h, ok := x.config.handlers[stream]
 	if !ok {
@@ -177,13 +128,13 @@ func (x *XStream) process(ctx context.Context, stream string, m redis.XMessage) 
 		return err
 	}
 
-	return x.config.write.XAck(ctx, stream, x.config.group, m.ID).Err()
+	return x.conn.write.XAck(ctx, stream, x.config.group, m.ID).Err()
 }
 
 func (x *XStream) reclaimLoop(ctx context.Context) error {
 	for range time.Tick(x.config.reclaimInterval) {
 		for _, stream := range x.config.streams {
-			messages, _, err := x.config.read.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+			messages, _, err := x.conn.read.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 				Stream:   stream,
 				Group:    x.config.group,
 				Consumer: x.config.consumer,
@@ -211,7 +162,7 @@ func (x *XStream) reclaimLoop(ctx context.Context) error {
 }
 
 func (x *XStream) handleDead(ctx context.Context, stream string, m redis.XMessage) (bool, error) {
-	result, err := x.config.reclaim.XPendingExt(ctx, &redis.XPendingExtArgs{
+	result, err := x.conn.reclaim.XPendingExt(ctx, &redis.XPendingExtArgs{
 		Stream: stream,
 		Group:  x.config.group,
 		Start:  m.ID,
@@ -227,11 +178,11 @@ func (x *XStream) handleDead(ctx context.Context, stream string, m redis.XMessag
 		return false, nil
 	}
 
-	if err := x.config.reclaim.XAck(ctx, stream, x.config.group, m.ID).Err(); err != nil {
+	if err := x.conn.reclaim.XAck(ctx, stream, x.config.group, m.ID).Err(); err != nil {
 		return false, err
 	}
 
-	if err := x.config.write.XAdd(ctx, &redis.XAddArgs{
+	if err := x.conn.write.XAdd(ctx, &redis.XAddArgs{
 		Stream: dlqFormat(stream),
 		ID:     "*",
 		Values: map[string]any{PayloadKey: m.Values[PayloadKey]},
