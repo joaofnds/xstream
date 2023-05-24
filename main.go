@@ -74,8 +74,10 @@ func (conn *XStream) Start(ctx context.Context) error {
 		return err
 	}
 
-	conn.Listen(ctx)
-	conn.ReclaimLoop(ctx)
+	go conn.listenLoop(ctx)
+	if conn.config.reclaimEnabled {
+		go conn.reclaimLoop(ctx)
+	}
 
 	return nil
 }
@@ -92,6 +94,28 @@ func (conn *XStream) Stop() error {
 	return conn.reclaim.Close()
 }
 
+func (conn *XStream) listenLoop(ctx context.Context) error {
+	for {
+		streams, err := conn.read.XReadGroup(ctx, &redis.XReadGroupArgs{
+			Group:    conn.config.group,
+			Consumer: conn.config.consumer,
+			Streams:  streamsReadFormat(conn.config.streams),
+			Block:    conn.config.readTimeout,
+			Count:    1,
+		}).Result()
+
+		if err != nil {
+			return err
+		}
+
+		for _, v := range streams {
+			for _, m := range v.Messages {
+				conn.process(ctx, v.Stream, m)
+			}
+		}
+	}
+}
+
 func (conn *XStream) Emit(ctx context.Context, event string, payload string) error {
 	_, err := conn.write.XAdd(ctx, &redis.XAddArgs{
 		Stream: event,
@@ -101,16 +125,12 @@ func (conn *XStream) Emit(ctx context.Context, event string, payload string) err
 	return err
 }
 
-func streamsReadFormat(streams []string) []string {
-	result := make([]string, 0, len(streams)*2)
-	for _, s := range streams {
-		result = append(result, s, ">")
-	}
-	return result
+func (conn *XStream) On(stream string, f Handler) {
+	conn.config.handlers[stream] = f
 }
 
-func dlqFormat(stream string) string {
-	return "dead:" + stream
+func (conn *XStream) OnDlq(stream string, f Handler) {
+	conn.config.handlers[dlqFormat(stream)] = f
 }
 
 func (conn *XStream) ensureGroupsExists(ctx context.Context) error {
@@ -128,7 +148,7 @@ func (conn *XStream) ensureGroupsExists(ctx context.Context) error {
 	return nil
 }
 
-func (conn *XStream) Process(ctx context.Context, stream string, m redis.XMessage) error {
+func (conn *XStream) process(ctx context.Context, stream string, m redis.XMessage) error {
 	h, ok := conn.config.handlers[stream]
 	if !ok {
 		fmt.Printf("handler for stream %s not found\n", stream)
@@ -143,69 +163,43 @@ func (conn *XStream) Process(ctx context.Context, stream string, m redis.XMessag
 	return conn.write.XAck(ctx, stream, conn.config.group, m.ID).Err()
 }
 
-func (conn *XStream) Listen(ctx context.Context) {
-	go func() {
-		for {
-			result := conn.read.XReadGroup(ctx, &redis.XReadGroupArgs{
+func streamsReadFormat(streams []string) []string {
+	result := make([]string, 0, len(streams)*2)
+	for _, s := range streams {
+		result = append(result, s, ">")
+	}
+	return result
+}
+
+func dlqFormat(stream string) string {
+	return "dead:" + stream
+}
+
+func (conn *XStream) reclaimLoop(ctx context.Context) error {
+	for range time.Tick(conn.config.reclaimInterval) {
+		for _, stream := range conn.config.streams {
+			messages, _, err := conn.read.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+				Stream:   stream,
 				Group:    conn.config.group,
 				Consumer: conn.config.consumer,
-				Streams:  streamsReadFormat(conn.config.streams),
-				Block:    conn.config.readTimeout,
-				Count:    1,
-			})
+				MinIdle:  conn.config.reclaimMinIdleTime,
+				Start:    "0",
+				Count:    int64(conn.config.reclaimCount),
+			}).Result()
 
-			if result.Err() != nil {
-				panic(result.Err())
+			if err != nil {
+				return err
 			}
 
-			for _, v := range result.Val() {
-				for _, m := range v.Messages {
-					conn.Process(ctx, v.Stream, m)
+			for _, m := range messages {
+				isDead := conn.handleDead(ctx, stream, m)
+				if !isDead {
+					conn.process(ctx, stream, m)
 				}
 			}
 		}
-	}()
-}
-
-func (conn *XStream) On(stream string, f Handler) {
-	conn.config.handlers[stream] = f
-}
-
-func (conn *XStream) OnDlq(stream string, f Handler) {
-	conn.config.handlers[dlqFormat(stream)] = f
-}
-
-func (conn *XStream) ReclaimLoop(ctx context.Context) {
-	if !conn.config.reclaimEnabled {
-		return
 	}
-
-	go func() {
-		for range time.Tick(conn.config.reclaimInterval) {
-			for _, stream := range conn.config.streams {
-				result := conn.read.XAutoClaim(ctx, &redis.XAutoClaimArgs{
-					Stream:   stream,
-					Group:    conn.config.group,
-					Consumer: conn.config.consumer,
-					MinIdle:  conn.config.reclaimMinIdleTime,
-					Start:    "0",
-					Count:    int64(conn.config.reclaimCount),
-				})
-
-				if result.Err() != nil {
-					panic(result.Err().Error())
-				}
-
-				msgs, _ := result.Val()
-				for _, m := range msgs {
-					isDead := conn.handleDead(ctx, stream, m)
-					if !isDead {
-						conn.Process(ctx, stream, m)
-					}
-				}
-			}
-		}
-	}()
+	return nil
 }
 
 func (conn *XStream) handleDead(ctx context.Context, stream string, m redis.XMessage) bool {
@@ -216,6 +210,7 @@ func (conn *XStream) handleDead(ctx context.Context, stream string, m redis.XMes
 		End:    m.ID,
 		Count:  1,
 	}).Result()
+
 	if err != nil {
 		panic(err.Error())
 	}
