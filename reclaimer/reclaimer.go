@@ -81,7 +81,7 @@ func (r *Reclaimer) handleDead(ctx context.Context, stream string, m redis.XMess
 	if err := r.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: r.config.DLQFormat(stream),
 		ID:     "*",
-		Values: map[string]any{config.PayloadKey: m.Values[config.PayloadKey]},
+		Values: map[string]any{config.BodyKey: m.Values[config.BodyKey]},
 	}).Err(); err != nil {
 		return false, err
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -28,13 +29,13 @@ func main() {
 		},
 	})
 
-	x.On("user.created", func(id string, payload []byte) error {
-		println("> " + string(payload))
+	x.On("user.created", func(msg config.Message) error {
+		fmt.Printf("< %#v\n", msg.Body)
 		return nil
 	})
 
-	x.OnDLQ("user.created", func(id string, payload []byte) error {
-		println("- " + string(payload))
+	x.OnDLQ("user.created", func(msg config.Message) error {
+		fmt.Printf("- %#v\n", msg)
 		return nil
 	})
 
@@ -44,7 +45,7 @@ func main() {
 
 	go func() {
 		for t := range time.Tick(100 * time.Millisecond) {
-			x.Emit(ctx, "user.created", config.Payload(t.String()))
+			x.Emit(ctx, "user.created", config.Message{Body: t.String()})
 		}
 	}()
 

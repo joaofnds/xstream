@@ -30,11 +30,20 @@ func (w *Writer) Ping(ctx context.Context) error {
 	return w.client.Ping(ctx).Err()
 }
 
-func (w *Writer) Emit(ctx context.Context, stream string, payload config.Payload) error {
+func (w *Writer) Emit(ctx context.Context, stream string, msg config.Message) error {
+	if msg.ID == "" {
+		msg.ID = "*"
+	}
+
+	values := map[string]any{config.BodyKey: msg.Body}
+	if msg.Metadata != nil {
+		values[config.MetadataKey] = msg.MetadataString()
+	}
+
 	return w.client.XAdd(ctx, &redis.XAddArgs{
+		ID:     msg.ID,
 		Stream: stream,
-		ID:     "*",
-		Values: map[string]any{config.PayloadKey: payload},
+		Values: values,
 	}).Err()
 }
 

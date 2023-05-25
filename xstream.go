@@ -83,6 +83,6 @@ func (x *XStream) OnDLQ(stream string, h config.Handler) {
 	x.config.AddListener(x.config.DLQFormat(stream), h)
 }
 
-func (x *XStream) Emit(ctx context.Context, stream string, payload config.Payload) error {
-	return x.writer.Emit(ctx, stream, payload)
+func (x *XStream) Emit(ctx context.Context, stream string, msg config.Message) error {
+	return x.writer.Emit(ctx, stream, msg)
 }
