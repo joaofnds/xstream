@@ -9,11 +9,10 @@ import (
 	"time"
 
 	"github.com/joaofnds/xstream"
-	"github.com/joaofnds/xstream/config"
 )
 
 func main() {
-	x := xstream.NewXStream(&config.Config{
+	x := xstream.NewXStream(&xstream.Config{
 		Group:                "test-Group",
 		Consumer:             "test-consumer",
 		Streams:              []string{"user.created"},
@@ -22,19 +21,19 @@ func main() {
 		ReclaimCount:         100,
 		ReclaimMinIdleTime:   5000 * time.Millisecond,
 		ReclaimMaxDeliveries: 3,
-		Redis: &config.RedisOptions{
+		Redis: &xstream.RedisOptions{
 			Addr:     "localhost:6379",
 			Password: "",
 			DB:       0,
 		},
 	})
 
-	x.On("user.created", func(msg config.Message) error {
+	x.On("user.created", func(msg xstream.Message) error {
 		fmt.Printf("< %#v\n", msg.Body)
 		return nil
 	})
 
-	x.OnDLQ("user.created", func(msg config.Message) error {
+	x.OnDead("user.created", func(msg xstream.Message) error {
 		fmt.Printf("- %#v\n", msg)
 		return nil
 	})
@@ -44,8 +43,8 @@ func main() {
 	defer x.Stop(ctx)
 
 	go func() {
-		for t := range time.Tick(100 * time.Millisecond) {
-			x.Emit(ctx, "user.created", config.Message{Body: t.String()})
+		for t := range time.Tick(1000 * time.Millisecond) {
+			x.Emit(ctx, "user.created", xstream.Message{Body: t.String()})
 		}
 	}()
 

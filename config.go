@@ -1,4 +1,4 @@
-package config
+package xstream
 
 import (
 	"log"
@@ -32,18 +32,18 @@ type Config struct {
 	Redis *RedisOptions
 }
 
-func (config *Config) AddListener(stream string, h Handler) {
+func (config *Config) addListener(stream string, h Handler) {
 	config.Handlers[stream] = h
 }
 
-func (config *Config) CallHandler(stream string, m redis.XMessage) error {
+func (config *Config) callHandler(stream string, m redis.XMessage) error {
 	if handler, ok := config.Handlers[stream]; ok {
-		return handler(NewMessageFromRedis(m))
+		return handler(newMessageFromRedis(m))
 	}
 	return nil
 }
 
-func (config *Config) StreamsReadFormat(streams []string) []string {
+func streamsReadFormat(streams []string) []string {
 	result := make([]string, 0, len(streams)*2)
 	for _, s := range streams {
 		result = append(result, s, ">")
@@ -51,6 +51,6 @@ func (config *Config) StreamsReadFormat(streams []string) []string {
 	return result
 }
 
-func (config *Config) DLQFormat(stream string) string {
+func dlqFormat(stream string) string {
 	return "dead:" + stream
 }

@@ -1,24 +1,22 @@
-package reclaimer
+package xstream
 
 import (
 	"context"
 	"time"
 
-	"github.com/joaofnds/xstream/config"
-
 	"github.com/redis/go-redis/v9"
 )
 
-type Reclaimer struct {
-	config *config.Config
+type reclaimer struct {
+	config *Config
 	client *redis.Client
 }
 
-func NewReclaimer(cfg *config.Config) *Reclaimer {
-	return &Reclaimer{config: cfg, client: redis.NewClient(cfg.Redis)}
+func newReclaimer(cfg *Config) *reclaimer {
+	return &reclaimer{config: cfg, client: redis.NewClient(cfg.Redis)}
 }
 
-func (r *Reclaimer) Start(ctx context.Context) error {
+func (r *reclaimer) start(ctx context.Context) error {
 	for range time.Tick(r.config.ReclaimInterval) {
 		for _, stream := range r.config.Streams {
 			messages, _, err := r.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
@@ -49,15 +47,15 @@ func (r *Reclaimer) Start(ctx context.Context) error {
 	return nil
 }
 
-func (r *Reclaimer) Stop(_ context.Context) error {
+func (r *reclaimer) stop(_ context.Context) error {
 	return r.client.Close()
 }
 
-func (r *Reclaimer) Ping(ctx context.Context) error {
+func (r *reclaimer) ping(ctx context.Context) error {
 	return r.client.Ping(ctx).Err()
 }
 
-func (r *Reclaimer) handleDead(ctx context.Context, stream string, m redis.XMessage) (bool, error) {
+func (r *reclaimer) handleDead(ctx context.Context, stream string, m redis.XMessage) (bool, error) {
 	result, err := r.client.XPendingExt(ctx, &redis.XPendingExtArgs{
 		Stream: stream,
 		Group:  r.config.Group,
@@ -79,22 +77,22 @@ func (r *Reclaimer) handleDead(ctx context.Context, stream string, m redis.XMess
 	}
 
 	if err := r.client.XAdd(ctx, &redis.XAddArgs{
-		Stream: r.config.DLQFormat(stream),
+		Stream: dlqFormat(stream),
 		ID:     "*",
-		Values: map[string]any{config.BodyKey: m.Values[config.BodyKey]},
+		Values: map[string]any{BodyKey: m.Values[BodyKey]},
 	}).Err(); err != nil {
 		return false, err
 	}
 
-	if err := r.config.CallHandler(r.config.DLQFormat(stream), m); err != nil {
+	if err := r.config.callHandler(dlqFormat(stream), m); err != nil {
 		r.config.Logger.Println("failed to process dead message " + m.ID)
 	}
 
 	return true, nil
 }
 
-func (r *Reclaimer) process(ctx context.Context, stream string, msg redis.XMessage) error {
-	if err := r.config.CallHandler(stream, msg); err != nil {
+func (r *reclaimer) process(ctx context.Context, stream string, msg redis.XMessage) error {
+	if err := r.config.callHandler(stream, msg); err != nil {
 		return err
 	}
 

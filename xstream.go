@@ -3,23 +3,18 @@ package xstream
 import (
 	"context"
 	"log"
-
-	"github.com/joaofnds/xstream/config"
-	"github.com/joaofnds/xstream/reader"
-	"github.com/joaofnds/xstream/reclaimer"
-	"github.com/joaofnds/xstream/writer"
 )
 
 type XStream struct {
-	config    *config.Config
-	reader    *reader.Reader
-	writer    *writer.Writer
-	reclaimer *reclaimer.Reclaimer
+	config    *Config
+	reader    *reader
+	writer    *writer
+	reclaimer *reclaimer
 }
 
-func NewXStream(cfg *config.Config) *XStream {
+func NewXStream(cfg *Config) *XStream {
 	if cfg.Handlers == nil {
-		cfg.Handlers = map[string]config.Handler{}
+		cfg.Handlers = map[string]Handler{}
 	}
 
 	if cfg.Logger == nil {
@@ -28,9 +23,9 @@ func NewXStream(cfg *config.Config) *XStream {
 
 	return &XStream{
 		config:    cfg,
-		reader:    reader.NewReader(cfg),
-		writer:    writer.NewWriter(cfg),
-		reclaimer: reclaimer.NewReclaimer(cfg),
+		reader:    newReader(cfg),
+		writer:    newWriter(cfg),
+		reclaimer: newReclaimer(cfg),
 	}
 }
 
@@ -39,50 +34,50 @@ func (x *XStream) Start(ctx context.Context) error {
 		return err
 	}
 
-	if err := x.writer.Start(ctx); err != nil {
+	if err := x.writer.start(ctx); err != nil {
 		return err
 	}
 
-	go x.reader.Start(ctx)
+	go x.reader.start(ctx)
 	if x.config.ReclaimEnabled {
-		go x.reclaimer.Start(ctx)
+		go x.reclaimer.start(ctx)
 	}
 
 	return nil
 }
 
 func (x *XStream) Stop(ctx context.Context) error {
-	if err := x.reader.Stop(ctx); err != nil {
+	if err := x.reader.stop(ctx); err != nil {
 		return err
 	}
 
-	if err := x.writer.Stop(ctx); err != nil {
+	if err := x.writer.stop(ctx); err != nil {
 		return err
 	}
 
-	return x.reclaimer.Stop(ctx)
+	return x.reclaimer.stop(ctx)
 }
 
 func (x *XStream) Ping(ctx context.Context) error {
-	if err := x.reader.Ping(ctx); err != nil {
+	if err := x.reader.ping(ctx); err != nil {
 		return err
 	}
 
-	if err := x.writer.Ping(ctx); err != nil {
+	if err := x.writer.ping(ctx); err != nil {
 		return err
 	}
 
-	return x.reclaimer.Ping(ctx)
+	return x.reclaimer.ping(ctx)
 }
 
-func (x *XStream) On(stream string, h config.Handler) {
-	x.config.AddListener(stream, h)
+func (x *XStream) On(stream string, h Handler) {
+	x.config.addListener(stream, h)
 }
 
-func (x *XStream) OnDLQ(stream string, h config.Handler) {
-	x.config.AddListener(x.config.DLQFormat(stream), h)
+func (x *XStream) OnDead(stream string, h Handler) {
+	x.config.addListener(dlqFormat(stream), h)
 }
 
-func (x *XStream) Emit(ctx context.Context, stream string, msg config.Message) error {
-	return x.writer.Emit(ctx, stream, msg)
+func (x *XStream) Emit(ctx context.Context, stream string, msg Message) error {
+	return x.writer.emit(ctx, stream, msg)
 }

@@ -1,43 +1,41 @@
-package writer
+package xstream
 
 import (
 	"context"
 	"strings"
 
-	"github.com/joaofnds/xstream/config"
-
 	"github.com/redis/go-redis/v9"
 )
 
-type Writer struct {
-	config *config.Config
+type writer struct {
+	config *Config
 	client *redis.Client
 }
 
-func NewWriter(cfg *config.Config) *Writer {
-	return &Writer{config: cfg, client: redis.NewClient(cfg.Redis)}
+func newWriter(cfg *Config) *writer {
+	return &writer{config: cfg, client: redis.NewClient(cfg.Redis)}
 }
 
-func (w *Writer) Start(ctx context.Context) error {
+func (w *writer) start(ctx context.Context) error {
 	return w.ensureGroupsExist(ctx)
 }
 
-func (w *Writer) Stop(_ context.Context) error {
+func (w *writer) stop(_ context.Context) error {
 	return w.client.Close()
 }
 
-func (w *Writer) Ping(ctx context.Context) error {
+func (w *writer) ping(ctx context.Context) error {
 	return w.client.Ping(ctx).Err()
 }
 
-func (w *Writer) Emit(ctx context.Context, stream string, msg config.Message) error {
+func (w *writer) emit(ctx context.Context, stream string, msg Message) error {
 	if msg.ID == "" {
 		msg.ID = "*"
 	}
 
-	values := map[string]any{config.BodyKey: msg.Body}
+	values := map[string]any{BodyKey: msg.Body}
 	if msg.Metadata != nil {
-		values[config.MetadataKey] = msg.MetadataString()
+		values[MetadataKey] = msg.metadataString()
 	}
 
 	return w.client.XAdd(ctx, &redis.XAddArgs{
@@ -47,7 +45,7 @@ func (w *Writer) Emit(ctx context.Context, stream string, msg config.Message) er
 	}).Err()
 }
 
-func (w *Writer) ensureGroupsExist(ctx context.Context) error {
+func (w *writer) ensureGroupsExist(ctx context.Context) error {
 	for _, stream := range w.config.Streams {
 		err := w.client.XGroupCreateMkStream(ctx, stream, w.config.Group, "$").Err()
 		if err != nil {

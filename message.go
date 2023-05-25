@@ -1,4 +1,4 @@
-package config
+package xstream
 
 import (
 	"encoding/json"
@@ -12,7 +12,7 @@ type Message struct {
 	Metadata map[string]string
 }
 
-func NewMessageFromRedis(redisMsg redis.XMessage) Message {
+func newMessageFromRedis(redisMsg redis.XMessage) Message {
 	var metadata map[string]string
 	if v, ok := redisMsg.Values[MetadataKey].(string); ok {
 		json.Unmarshal([]byte(v), &metadata)
@@ -24,7 +24,7 @@ func NewMessageFromRedis(redisMsg redis.XMessage) Message {
 	}
 }
 
-func (m Message) MetadataString() string {
+func (m Message) metadataString() string {
 	b, _ := json.Marshal(m.Metadata)
 	return string(b)
 }
